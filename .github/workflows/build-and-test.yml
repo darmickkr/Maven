@@ -1,21 +1,30 @@
-name: Build War Project
+name: Java CI with Maven
 
-on: [push, pull_request]
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Set up Java
+    - name: Set up JDK 17
       uses: actions/setup-java@v4
       with:
         java-version: '17'
         distribution: 'temurin'
+        cache: maven
 
-    # This tells GitHub to run the command inside your main warproject folder
-    - name: Build Web Application
-      working-directory: ./warproject
-      run: mvn clean install
+    # Step 1: Install core-library into the runner's local storage
+    - name: Build Core Library
+      run: mvn clean install -f core-library/pom.xml
+
+    # Step 2: Now build your warproject safely
+    - name: Build War Project
+      run: mvn clean install -f warproject/pom.xml
