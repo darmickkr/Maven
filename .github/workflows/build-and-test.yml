@@ -57,7 +57,17 @@ jobs:
         key: ${{ secrets.AWS_EC2_KEY }}
         port: 22
         script: | 
+          # 1. Force public DNS resolution inside the Docker configuration daemon
+          sudo mkdir -p /etc/docker
+          echo '{"dns": ["8.8.8.8", "1.1.1.1"]}' | sudo tee /etc/docker/daemon.json
+          
+          # 2. Restart Docker to apply the network changes immediately
+          sudo systemctl restart docker
+          
+          # 3. Stop and clean up any old containers
           docker stop maven-app || true
           docker rm maven-app || true
-          docker pull ${{ env.DOCKER_IMAGE_NAME }} || true
-          docker run -d --name maven-app --dns 8.8.8.8 -p 80:8080 ${{ env.DOCKER_IMAGE_NAME }}
+          
+          # 4. Pull and execute the container using the newly established network route
+          docker pull ${{ env.DOCKER_IMAGE_NAME }}
+          docker run -d --name maven-app -p 80:8080 ${{ env.DOCKER_IMAGE_NAME }}
