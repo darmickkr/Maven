@@ -52,50 +52,46 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    # Step 1: Log in to Docker Hub on the runner machine
     - name: Log in to Docker Hub
       uses: docker/login-action@v3
       with:
         username: ${{ vars.DOCKER_USER_NAME }}
         password: ${{ secrets.DOCKER_PASSWORD }}
 
-    # Step 2: Download the image onto the GitHub runner machine
     - name: Pull image onto runner
       run: docker pull ${{ env.DOCKER_IMAGE_NAME }}
 
-    # Step 3: Package the Docker image into a compressed tar file
     - name: Save Docker image to archive
       run: docker save ${{ env.DOCKER_IMAGE_NAME }} -o image.tar
 
-    # Step 4: Transfer the image file directly to your EC2 server over SSH
-    - name: Transfer image to EC2 via SCP
-      uses: appleboy/scp-action@v0.1.7
-      with:
-        host: ${{ vars.HOST_IP }}
-        username: ubuntu
-        key: ${{ secrets.AWS_EC2_KEY }}
-        port: 22
-        source: "image.tar"
-        target: "/home/ubuntu/"
+    # Native Linux SCP and SSH transfer
+    - name: Copy and Deploy via Native Linux Commands
+      run: |
+        # 1. Write the EC2 private key securely onto the runner disk
+        echo "${{ secrets.AWS_EC2_KEY }}" > private_key.pem
+        chmod 600 private_key.pem
 
-    # Step 5: Log into EC2, load the local file, and start your container
-    - name: Deploy container locally on server
-      uses: appleboy/ssh-action@v1
-      with: 
-        host: ${{ vars.HOST_IP }}
-        username: ubuntu
-        key: ${{ secrets.AWS_EC2_KEY }}
-        port: 22
-        script: | 
-          # Stop and remove any older application instances
-          docker stop maven-app || true
-          docker rm maven-app || true
+        # 2. Direct transfer via native Linux SCP
+        echo "🚀 Transferring image.tar to EC2..."
+        scp -o StrictHostKeyChecking=no -i private_key.pem image.tar ubuntu@${{ vars.HOST_IP }}:/home/ubuntu/image.tar
+
+        # 3. Direct execution via native Linux SSH
+        echo "⚡ Executing remote deployment script on EC2..."
+        ssh -o StrictHostKeyChecking=no -i private_key.pem ubuntu@${{ vars.HOST_IP }} << 'EOF'
+          # Clean up old containers
+          sudo docker stop maven-app || true
+          sudo docker rm maven-app || true
           
-          # Load the image from the file transferred to the local disk
-          docker load -i /home/ubuntu/image.tar
+          # Load image from local disk
+          sudo docker load -i /home/ubuntu/image.tar
           
-          # Delete the file to save disk space on your server
+          # Delete file to clear disk space
           rm -f /home/ubuntu/image.tar
           
-          # Run your web application
-          docker run -d --name maven-app -p 80:8080 ${{ env.DOCKER_IMAGE_NAME }}
+          # Start the new application container
+          sudo docker run -d --name maven-app -p 80:8080 ${{ env.DOCKER_IMAGE_NAME }}
+        EOF
+
+        # 4. Clean up key file from the GitHub runner
+        rm -f private_key.pem
+
