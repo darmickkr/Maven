@@ -47,22 +47,17 @@ jobs:
 
   deploy:
     runs-on: ubuntu-latest
-    needs: build # Ensures deploy only runs AFTER build completes successfully
+    needs: build
     steps:
     - name: server ssh
-      uses: appleboy/ssh-actions@v1
+      uses: appleboy/ssh-action@v1  # <-- FIXED: removed the 's' from ssh-actions
       with: 
         host: ${{ vars.HOST_IP }}
         username: ubuntu
         key: ${{ secrets.AWS_EC2_KEY }}
         port: 22
         script: | 
-          # 1. Stop and remove the existing container if it is running to prevent naming conflicts
           docker stop maven-app || true
           docker rm maven-app || true
-          
-          # 2. Pull the latest image from Docker Hub
           docker pull ${{ env.DOCKER_IMAGE_NAME }}
-          
-          # 3. Run the new container, mapping public port 80 to Tomcat's port 8080
           docker run -d --name maven-app -p 80:8080 ${{ env.DOCKER_IMAGE_NAME }}
