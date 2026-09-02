@@ -49,25 +49,53 @@ jobs:
     runs-on: ubuntu-latest
     needs: build
     steps:
-    - name: server ssh
-      uses: appleboy/ssh-action@v1  # <-- FIXED: removed the 's' from ssh-actions
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    # Step 1: Log in to Docker Hub on the runner machine
+    - name: Log in to Docker Hub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ vars.DOCKER_USER_NAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+
+    # Step 2: Download the image onto the GitHub runner machine
+    - name: Pull image onto runner
+      run: docker pull ${{ env.DOCKER_IMAGE_NAME }}
+
+    # Step 3: Package the Docker image into a compressed tar file
+    - name: Save Docker image to archive
+      run: docker save ${{ env.DOCKER_IMAGE_NAME }} -o image.tar
+
+    # Step 4: Transfer the image file directly to your EC2 server over SSH
+    - name: Transfer image to EC2 via SCP
+      uses: appleboy/scp-action@v0.1.7
+      with:
+        host: ${{ vars.HOST_IP }}
+        username: ubuntu
+        key: ${{ secrets.AWS_EC2_KEY }}
+        port: 22
+        source: "image.tar"
+        target: "/home/ubuntu/"
+
+    # Step 5: Log into EC2, load the local file, and start your container
+    - name: Deploy container locally on server
+      uses: appleboy/ssh-action@v1
       with: 
         host: ${{ vars.HOST_IP }}
         username: ubuntu
         key: ${{ secrets.AWS_EC2_KEY }}
         port: 22
         script: | 
-          # 1. Force public DNS resolution inside the Docker configuration daemon
-          sudo mkdir -p /etc/docker
-          echo '{"dns": ["8.8.8.8", "1.1.1.1"]}' | sudo tee /etc/docker/daemon.json
-          
-          # 2. Restart Docker to apply the network changes immediately
-          sudo systemctl restart docker
-          
-          # 3. Stop and clean up any old containers
+          # Stop and remove any older application instances
           docker stop maven-app || true
           docker rm maven-app || true
           
-          # 4. Pull and execute the container using the newly established network route
-          docker pull ${{ env.DOCKER_IMAGE_NAME }}
+          # Load the image from the file transferred to the local disk
+          docker load -i /home/ubuntu/image.tar
+          
+          # Delete the file to save disk space on your server
+          rm -f /home/ubuntu/image.tar
+          
+          # Run your web application
           docker run -d --name maven-app -p 80:8080 ${{ env.DOCKER_IMAGE_NAME }}
